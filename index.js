@@ -39,8 +39,14 @@ client.once('ready', async () => {
 async function registerCommands() {
   const commands = [
     new SlashCommandBuilder()
-      .setName('top5')
-      .setDescription(`Affiche le top 5 des messages avec le plus de ${EMOJI}`),
+      .setName('ltop')
+      .setDescription(`Affiche le top des messages avec le plus de ${EMOJI}`)
+      .addIntegerOption(option =>
+        option.setName('nombre')
+          .setDescription('Nombre de messages à afficher (1-10)')
+          .setRequired(true)
+          .setMinValue(1)
+          .setMaxValue(10)),
     new SlashCommandBuilder()
       .setName('lrandom')
       .setDescription(`Affiche un message aléatoire parmi ceux avec ${EMOJI}`)
@@ -51,7 +57,7 @@ async function registerCommands() {
   try {
     console.log('🔧 Enregistrement des commandes slash...');
     const result = await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log(`✅ Commandes enregistrées:`, JSON.stringify(result, null, 2));
+    console.log(`✅ Commandes /ltop et /lrandom enregistrées!`);
   } catch (error) {
     console.error('❌ Erreur enregistrement commandes:', error.message);
     console.error(error);
@@ -276,28 +282,41 @@ client.on('interactionCreate', async (interaction) => {
 
   console.log(`📝 Commande slash reçue: /${interaction.commandName}`);
 
-  if (interaction.commandName === 'top5') {
-    console.log(`🏆 /top5 exécutée - ${collectedMessages.size} messages en mémoire`);
+  if (interaction.commandName === 'ltop') {
+    const nombre = interaction.options.getInteger('nombre');
+    console.log(`🏆 /ltop ${nombre} exécutée - ${collectedMessages.size} messages en mémoire`);
+
     if (collectedMessages.size === 0) {
       await interaction.reply({ content: `Aucun message avec ${EMOJI} collecté pour le moment.`, ephemeral: true });
       return;
     }
 
-    // Trier par nombre de réactions et prendre le top 5
-    const top5 = [...collectedMessages.values()]
+    // Trier par nombre de réactions et prendre le top N
+    const topMessages = [...collectedMessages.values()]
       .sort((a, b) => b.reactionCount - a.reactionCount)
-      .slice(0, 5);
+      .slice(0, nombre);
 
-    const embeds = top5.map((msgData, index) => {
+    // Envoyer chaque message avec son bouton
+    await interaction.reply({ content: `## 🏆 Top ${nombre} des messages avec ${EMOJI}` });
+
+    for (let i = 0; i < topMessages.length; i++) {
+      const msgData = topMessages[i];
       const embed = createEmbed(msgData);
-      embed.setTitle(`#${index + 1}`);
-      return embed;
-    });
+      embed.setTitle(`#${i + 1}`);
 
-    await interaction.reply({
-      content: `## 🏆 Top 5 des messages avec ${EMOJI}`,
-      embeds: embeds
-    });
+      await interaction.channel.send({
+        embeds: [embed],
+        components: [{
+          type: 1,
+          components: [{
+            type: 2,
+            style: 5,
+            label: 'Voir le message',
+            url: msgData.url
+          }]
+        }]
+      });
+    }
   }
 
   if (interaction.commandName === 'lrandom') {
