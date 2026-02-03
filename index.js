@@ -17,6 +17,8 @@ const EMOJI = process.env.EMOJI || '🤣';
 
 // Stockage des messages collectés (id -> data)
 const collectedMessages = new Map();
+// Set des messages déjà envoyés dans le salon destination
+const alreadySentIds = new Set();
 
 client.once('ready', async () => {
   console.log(`✅ Bot connecté en tant que ${client.user.tag}`);
@@ -27,7 +29,10 @@ client.once('ready', async () => {
   // Enregistrer les slash commands
   await registerCommands();
 
-  // Scanner l'historique au démarrage
+  // Scanner le salon destination pour récupérer les messages déjà envoyés
+  await loadAlreadySent();
+
+  // Scanner l'historique source
   await scanHistory();
 });
 
@@ -37,7 +42,7 @@ async function registerCommands() {
       .setName('top5')
       .setDescription(`Affiche le top 5 des messages avec le plus de ${EMOJI}`),
     new SlashCommandBuilder()
-      .setName('random')
+      .setName('lrandom')
       .setDescription(`Affiche un message aléatoire parmi ceux avec ${EMOJI}`)
   ].map(cmd => cmd.toJSON());
 
@@ -46,14 +51,53 @@ async function registerCommands() {
   try {
     console.log('🔧 Enregistrement des commandes slash...');
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('✅ Commandes /top5 et /random enregistrées!');
+    console.log('✅ Commandes /top5 et /lrandom enregistrées!');
   } catch (error) {
     console.error('Erreur enregistrement commandes:', error);
   }
 }
 
+// Scan le salon destination pour récupérer les IDs déjà envoyés
+async function loadAlreadySent() {
+  console.log('🔍 Chargement des messages déjà envoyés...');
+
+  const targetChannel = await client.channels.fetch(TARGET_CHANNEL_ID);
+  if (!targetChannel) return;
+
+  let lastMessageId = null;
+  let totalLoaded = 0;
+
+  while (true) {
+    const options = { limit: 100 };
+    if (lastMessageId) options.before = lastMessageId;
+
+    const messages = await targetChannel.messages.fetch(options);
+    if (messages.size === 0) break;
+
+    for (const msg of messages.values()) {
+      // Chercher l'ID du message original dans le bouton "Voir le message"
+      if (msg.components && msg.components.length > 0) {
+        const button = msg.components[0]?.components?.find(c => c.url);
+        if (button && button.url) {
+          // URL format: https://discord.com/channels/GUILD/CHANNEL/MESSAGE_ID
+          const parts = button.url.split('/');
+          const originalId = parts[parts.length - 1];
+          if (originalId) {
+            alreadySentIds.add(originalId);
+            totalLoaded++;
+          }
+        }
+      }
+    }
+
+    lastMessageId = messages.last().id;
+  }
+
+  console.log(`✅ ${totalLoaded} messages déjà envoyés chargés (seront ignorés)`);
+}
+
 async function scanHistory() {
-  console.log('🔍 Scan de l\'historique en cours...');
+  console.log('🔍 Scan de l\'historique source en cours...');
 
   const sourceChannel = await client.channels.fetch(SOURCE_CHANNEL_ID);
   const targetChannel = await client.channels.fetch(TARGET_CHANNEL_ID);
@@ -65,6 +109,7 @@ async function scanHistory() {
 
   let lastMessageId = null;
   let totalFound = 0;
+  let totalSkipped = 0;
 
   while (true) {
     const options = { limit: 100 };
@@ -76,12 +121,19 @@ async function scanHistory() {
     for (const message of messages.values()) {
       const reaction = message.reactions.cache.find(r => r.emoji.name === EMOJI);
 
-      if (reaction && reaction.count >= 1 && !collectedMessages.has(message.id)) {
-        // Stocker les infos du message
-        storeMessage(message, reaction.count);
+      if (reaction && reaction.count >= 1) {
+        // Vérifier si déjà envoyé
+        if (alreadySentIds.has(message.id)) {
+          // Juste stocker pour les commandes, sans renvoyer
+          await storeMessage(message, reaction.count);
+          totalSkipped++;
+          continue;
+        }
 
-        // Envoyer dans le salon destination
+        // Stocker et envoyer
+        await storeMessage(message, reaction.count);
         await sendToTarget(message, targetChannel, reaction.count);
+        alreadySentIds.add(message.id);
         totalFound++;
         // Petit délai pour éviter le rate limit
         await sleep(500);
@@ -92,10 +144,24 @@ async function scanHistory() {
     console.log(`📜 Scanné ${messages.size} messages...`);
   }
 
-  console.log(`✅ Scan terminé! ${totalFound} messages trouvés avec ${EMOJI}`);
+  console.log(`✅ Scan terminé! ${totalFound} nouveaux messages envoyés, ${totalSkipped} déjà présents`);
 }
 
-function storeMessage(message, reactionCount) {
+async function storeMessage(message, reactionCount) {
+  // Récupérer le message cité si c'est une réponse
+  let replyTo = null;
+  if (message.reference && message.reference.messageId) {
+    try {
+      const repliedMsg = await message.channel.messages.fetch(message.reference.messageId);
+      replyTo = {
+        authorTag: repliedMsg.author.tag,
+        content: repliedMsg.content?.substring(0, 200) || '*[Pas de texte]*'
+      };
+    } catch (e) {
+      // Message original supprimé
+    }
+  }
+
   collectedMessages.set(message.id, {
     id: message.id,
     authorTag: message.author.tag,
@@ -105,17 +171,28 @@ function storeMessage(message, reactionCount) {
     channelName: message.channel.name,
     createdAt: message.createdAt,
     reactionCount: reactionCount,
-    image: message.attachments.find(a => a.contentType?.startsWith('image/'))?.url || null
+    image: message.attachments.find(a => a.contentType?.startsWith('image/'))?.url || null,
+    replyTo: replyTo
   });
 }
 
 function createEmbed(msgData) {
+  let description = '';
+
+  // Ajouter le message cité si présent
+  if (msgData.replyTo) {
+    description += `> **↩️ ${msgData.replyTo.authorTag}**\n`;
+    description += `> ${msgData.replyTo.content.split('\n').join('\n> ')}\n\n`;
+  }
+
+  description += msgData.content || '*[Pas de texte]*';
+
   const embed = new EmbedBuilder()
     .setAuthor({
       name: msgData.authorTag,
       iconURL: msgData.authorAvatar
     })
-    .setDescription(msgData.content || '*[Pas de texte]*')
+    .setDescription(description)
     .setColor(0xFFD700)
     .setTimestamp(msgData.createdAt)
     .setFooter({ text: `${EMOJI} ${msgData.reactionCount} | #${msgData.channelName}` });
@@ -128,12 +205,27 @@ function createEmbed(msgData) {
 }
 
 async function sendToTarget(message, targetChannel, reactionCount) {
+  let description = '';
+
+  // Ajouter le message cité si c'est une réponse
+  if (message.reference && message.reference.messageId) {
+    try {
+      const repliedMsg = await message.channel.messages.fetch(message.reference.messageId);
+      description += `> **↩️ ${repliedMsg.author.tag}**\n`;
+      description += `> ${repliedMsg.content?.substring(0, 200).split('\n').join('\n> ') || '*[Pas de texte]*'}\n\n`;
+    } catch (e) {
+      // Message original supprimé
+    }
+  }
+
+  description += message.content || '*[Pas de texte]*';
+
   const embed = new EmbedBuilder()
     .setAuthor({
       name: message.author.tag,
       iconURL: message.author.displayAvatarURL()
     })
-    .setDescription(message.content || '*[Pas de texte]*')
+    .setDescription(description)
     .setColor(0xFFD700)
     .setTimestamp(message.createdAt)
     .setFooter({ text: `${EMOJI} ${reactionCount} | #${message.channel.name}` });
@@ -184,7 +276,7 @@ client.on('interactionCreate', async (interaction) => {
     });
   }
 
-  if (interaction.commandName === 'random') {
+  if (interaction.commandName === 'lrandom') {
     if (collectedMessages.size === 0) {
       await interaction.reply({ content: `Aucun message avec ${EMOJI} collecté pour le moment.`, ephemeral: true });
       return;
@@ -245,10 +337,11 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
   }
 
-  storeMessage(message, reaction.count);
+  await storeMessage(message, reaction.count);
 
   const targetChannel = await client.channels.fetch(TARGET_CHANNEL_ID);
   await sendToTarget(message, targetChannel, reaction.count);
+  alreadySentIds.add(message.id);
 
   console.log(`📨 Nouveau message collecté de ${message.author.tag}`);
 });
