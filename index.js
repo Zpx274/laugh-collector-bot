@@ -61,42 +61,53 @@ async function registerCommands() {
 async function loadAlreadySent() {
   console.log('🔍 Chargement des messages déjà envoyés...');
 
-  const targetChannel = await client.channels.fetch(TARGET_CHANNEL_ID);
-  if (!targetChannel) return;
+  try {
+    const targetChannel = await client.channels.fetch(TARGET_CHANNEL_ID);
+    if (!targetChannel) {
+      console.log('❌ Salon destination introuvable');
+      return;
+    }
 
-  let lastMessageId = null;
-  let totalLoaded = 0;
+    let lastMessageId = null;
+    let totalLoaded = 0;
+    let batchCount = 0;
 
-  while (true) {
-    const options = { limit: 100 };
-    if (lastMessageId) options.before = lastMessageId;
+    while (true) {
+      const options = { limit: 100 };
+      if (lastMessageId) options.before = lastMessageId;
 
-    const messages = await targetChannel.messages.fetch(options);
-    if (messages.size === 0) break;
+      const messages = await targetChannel.messages.fetch(options);
+      batchCount++;
+      console.log(`📦 Batch ${batchCount}: ${messages.size} messages récupérés`);
 
-    for (const msg of messages.values()) {
-      // Chercher l'ID du message original dans le bouton "Voir le message"
-      if (msg.components && msg.components.length > 0) {
-        const button = msg.components[0]?.components?.find(c => c.url);
-        if (button && button.url) {
-          // URL format: https://discord.com/channels/GUILD/CHANNEL/MESSAGE_ID
-          const parts = button.url.split('/');
-          const originalId = parts[parts.length - 1];
-          if (originalId) {
-            alreadySentIds.add(originalId);
-            totalLoaded++;
+      if (messages.size === 0) break;
+
+      for (const msg of messages.values()) {
+        // Chercher l'ID du message original dans le bouton "Voir le message"
+        if (msg.components && msg.components.length > 0) {
+          const button = msg.components[0]?.components?.find(c => c.url);
+          if (button && button.url) {
+            // URL format: https://discord.com/channels/GUILD/CHANNEL/MESSAGE_ID
+            const parts = button.url.split('/');
+            const originalId = parts[parts.length - 1];
+            if (originalId) {
+              alreadySentIds.add(originalId);
+              totalLoaded++;
+            }
           }
         }
       }
+
+      lastMessageId = messages.last().id;
+
+      // Pause pour permettre au bot de répondre aux commandes
+      await sleep(50);
     }
 
-    lastMessageId = messages.last().id;
-
-    // Pause pour permettre au bot de répondre aux commandes
-    await sleep(50);
+    console.log(`✅ ${totalLoaded} messages déjà envoyés chargés (seront ignorés)`);
+  } catch (error) {
+    console.error('❌ Erreur lors du chargement:', error.message);
   }
-
-  console.log(`✅ ${totalLoaded} messages déjà envoyés chargés (seront ignorés)`);
 }
 
 async function scanHistory() {
