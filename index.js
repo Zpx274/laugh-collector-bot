@@ -13,7 +13,7 @@ const client = new Client({
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SOURCE_CHANNEL_ID = process.env.SOURCE_CHANNEL_ID;
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
-const EMOJI = process.env.EMOJI || '🤣';
+const EMOJIS = (process.env.EMOJIS || '🤣,😂').split(',').map(e => e.trim());
 
 // Stockage des messages collectés (id -> data)
 const collectedMessages = new Map();
@@ -24,7 +24,7 @@ client.once('ready', async () => {
   console.log(`✅ Bot connecté en tant que ${client.user.tag}`);
   console.log(`📥 Source: ${SOURCE_CHANNEL_ID}`);
   console.log(`📤 Destination: ${TARGET_CHANNEL_ID}`);
-  console.log(`😂 Émoji: ${EMOJI}`);
+  console.log(`😂 Émojis: ${EMOJIS.join(', ')}`);
 
   // Enregistrer les slash commands
   await registerCommands();
@@ -40,7 +40,7 @@ async function registerCommands() {
   const commands = [
     new SlashCommandBuilder()
       .setName('ltop')
-      .setDescription(`Affiche le top des messages avec le plus de ${EMOJI}`)
+      .setDescription(`Affiche le top des messages avec le plus de réactions`)
       .addIntegerOption(option =>
         option.setName('nombre')
           .setDescription('Nombre de messages à afficher (1-10)')
@@ -49,7 +49,7 @@ async function registerCommands() {
           .setMaxValue(10)),
     new SlashCommandBuilder()
       .setName('lrandom')
-      .setDescription(`Affiche un message aléatoire parmi ceux avec ${EMOJI}`)
+      .setDescription(`Affiche un message aléatoire parmi ceux collectés`)
   ].map(cmd => cmd.toJSON());
 
   const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
@@ -144,20 +144,20 @@ async function scanHistory() {
     if (messages.size === 0) break;
 
     for (const message of messages.values()) {
-      const reaction = message.reactions.cache.find(r => r.emoji.name === EMOJI);
+      const reaction = message.reactions.cache.find(r => EMOJIS.includes(r.emoji.name));
 
       if (reaction && reaction.count >= 1) {
         // Vérifier si déjà envoyé
         if (alreadySentIds.has(message.id)) {
           // Juste stocker pour les commandes, sans renvoyer
-          await storeMessage(message, reaction.count);
+          await storeMessage(message, reaction.count, reaction.emoji.name);
           totalSkipped++;
           continue;
         }
 
         // Stocker et envoyer
-        await storeMessage(message, reaction.count);
-        await sendToTarget(message, targetChannel, reaction.count);
+        await storeMessage(message, reaction.count, reaction.emoji.name);
+        await sendToTarget(message, targetChannel, reaction.count, reaction.emoji.name);
         alreadySentIds.add(message.id);
         totalFound++;
         // Petit délai pour éviter le rate limit
@@ -175,7 +175,7 @@ async function scanHistory() {
   console.log(`✅ Scan terminé! ${totalFound} nouveaux messages envoyés, ${totalSkipped} déjà présents`);
 }
 
-async function storeMessage(message, reactionCount) {
+async function storeMessage(message, reactionCount, emoji) {
   // Récupérer le message cité si c'est une réponse
   let replyTo = null;
   if (message.reference && message.reference.messageId) {
@@ -199,6 +199,7 @@ async function storeMessage(message, reactionCount) {
     channelName: message.channel.name,
     createdAt: message.createdAt,
     reactionCount: reactionCount,
+    emoji: emoji,
     image: message.attachments.find(a => a.contentType?.startsWith('image/'))?.url || null,
     replyTo: replyTo
   });
@@ -223,7 +224,7 @@ function createEmbed(msgData) {
     .setDescription(description)
     .setColor(0xFFD700)
     .setTimestamp(msgData.createdAt)
-    .setFooter({ text: `${EMOJI} ${msgData.reactionCount} | #${msgData.channelName}` });
+    .setFooter({ text: `${msgData.emoji} ${msgData.reactionCount} | #${msgData.channelName}` });
 
   if (msgData.image) {
     embed.setImage(msgData.image);
@@ -232,7 +233,7 @@ function createEmbed(msgData) {
   return embed;
 }
 
-async function sendToTarget(message, targetChannel, reactionCount) {
+async function sendToTarget(message, targetChannel, reactionCount, emoji) {
   let description = '';
 
   // Ajouter le message cité si c'est une réponse
@@ -256,7 +257,7 @@ async function sendToTarget(message, targetChannel, reactionCount) {
     .setDescription(description)
     .setColor(0xFFD700)
     .setTimestamp(message.createdAt)
-    .setFooter({ text: `${EMOJI} ${reactionCount} | #${message.channel.name}` });
+    .setFooter({ text: `${emoji} ${reactionCount} | #${message.channel.name}` });
 
   const image = message.attachments.find(a => a.contentType?.startsWith('image/'));
   if (image) {
@@ -291,7 +292,7 @@ client.on('interactionCreate', async (interaction) => {
     console.log(`🏆 /ltop ${nombre} exécutée - ${collectedMessages.size} messages en mémoire`);
 
     if (collectedMessages.size === 0) {
-      await interaction.reply({ content: `Aucun message avec ${EMOJI} collecté pour le moment.`, ephemeral: true });
+      await interaction.reply({ content: `Aucun message collecté pour le moment.`, ephemeral: true });
       return;
     }
 
@@ -301,7 +302,7 @@ client.on('interactionCreate', async (interaction) => {
       .slice(0, nombre);
 
     // Envoyer chaque message avec son bouton
-    await interaction.reply({ content: `## 🏆 Top ${nombre} des messages avec ${EMOJI}` });
+    await interaction.reply({ content: `## 🏆 Top ${nombre}` });
 
     for (let i = 0; i < topMessages.length; i++) {
       const msgData = topMessages[i];
@@ -326,7 +327,7 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.commandName === 'lrandom') {
     console.log(`🎲 /lrandom exécutée - ${collectedMessages.size} messages en mémoire`);
     if (collectedMessages.size === 0) {
-      await interaction.reply({ content: `Aucun message avec ${EMOJI} collecté pour le moment.`, ephemeral: true });
+      await interaction.reply({ content: `Aucun message collecté pour le moment.`, ephemeral: true });
       return;
     }
 
@@ -365,7 +366,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
   }
 
-  if (reaction.emoji.name !== EMOJI) return;
+  if (!EMOJIS.includes(reaction.emoji.name)) return;
 
   // Mettre à jour le compteur si déjà collecté
   if (collectedMessages.has(reaction.message.id)) {
@@ -385,10 +386,10 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
   }
 
-  await storeMessage(message, reaction.count);
+  await storeMessage(message, reaction.count, reaction.emoji.name);
 
   const targetChannel = await client.channels.fetch(TARGET_CHANNEL_ID);
-  await sendToTarget(message, targetChannel, reaction.count);
+  await sendToTarget(message, targetChannel, reaction.count, reaction.emoji.name);
   alreadySentIds.add(message.id);
 
   console.log(`📨 Nouveau message collecté de ${message.author.tag}`);
