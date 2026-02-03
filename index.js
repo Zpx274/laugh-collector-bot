@@ -268,9 +268,14 @@ async function sendToTarget(message, targetChannel, reactionCount) {
 
 // Handler des slash commands
 client.on('interactionCreate', async (interaction) => {
+  console.log(`🎮 Interaction reçue: ${interaction.type} - ${interaction.commandName || 'N/A'}`);
+
   if (!interaction.isChatInputCommand()) return;
 
+  console.log(`📝 Commande slash reçue: /${interaction.commandName}`);
+
   if (interaction.commandName === 'top5') {
+    console.log(`🏆 /top5 exécutée - ${collectedMessages.size} messages en mémoire`);
     if (collectedMessages.size === 0) {
       await interaction.reply({ content: `Aucun message avec ${EMOJI} collecté pour le moment.`, ephemeral: true });
       return;
@@ -294,6 +299,7 @@ client.on('interactionCreate', async (interaction) => {
   }
 
   if (interaction.commandName === 'lrandom') {
+    console.log(`🎲 /lrandom exécutée - ${collectedMessages.size} messages en mémoire`);
     if (collectedMessages.size === 0) {
       await interaction.reply({ content: `Aucun message avec ${EMOJI} collecté pour le moment.`, ephemeral: true });
       return;
