@@ -18,7 +18,17 @@ const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
 const EMOJIS = (process.env.EMOJIS || '🤣,😂').split(',').map(e => e.trim());
 
 // Fichier pour persister les données
-const DATA_FILE = '/app/data.json';
+const DATA_DIR = '/data';
+const DATA_FILE = `${DATA_DIR}/data.json`;
+
+// Créer le dossier s'il n'existe pas
+if (!fs.existsSync(DATA_DIR)) {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+  } catch (e) {
+    console.log('⚠️ Impossible de créer /data - les données ne seront pas persistées');
+  }
+}
 
 // Stockage des messages collectés (id -> data)
 let collectedMessages = new Map();
