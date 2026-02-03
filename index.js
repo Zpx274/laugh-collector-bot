@@ -56,8 +56,12 @@ async function registerCommands() {
 
   try {
     console.log('🔧 Enregistrement des commandes slash...');
-    const result = await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log(`✅ Commandes /ltop et /lrandom enregistrées!`);
+
+    // Enregistrer par guild pour que ce soit instantané
+    for (const guild of client.guilds.cache.values()) {
+      await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commands });
+      console.log(`✅ Commandes enregistrées sur ${guild.name}`);
+    }
   } catch (error) {
     console.error('❌ Erreur enregistrement commandes:', error.message);
     console.error(error);
