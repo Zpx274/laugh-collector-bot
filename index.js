@@ -50,10 +50,11 @@ async function registerCommands() {
 
   try {
     console.log('🔧 Enregistrement des commandes slash...');
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    console.log('✅ Commandes /top5 et /lrandom enregistrées!');
+    const result = await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+    console.log(`✅ Commandes enregistrées:`, JSON.stringify(result, null, 2));
   } catch (error) {
-    console.error('Erreur enregistrement commandes:', error);
+    console.error('❌ Erreur enregistrement commandes:', error.message);
+    console.error(error);
   }
 }
 
@@ -267,6 +268,7 @@ async function sendToTarget(message, targetChannel, reactionCount) {
 }
 
 // Handler des slash commands
+console.log('🔌 Listener interactionCreate attaché');
 client.on('interactionCreate', async (interaction) => {
   console.log(`🎮 Interaction reçue: ${interaction.type} - ${interaction.commandName || 'N/A'}`);
 
