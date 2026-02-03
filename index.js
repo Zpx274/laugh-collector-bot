@@ -91,6 +91,9 @@ async function loadAlreadySent() {
     }
 
     lastMessageId = messages.last().id;
+
+    // Pause pour permettre au bot de répondre aux commandes
+    await sleep(50);
   }
 
   console.log(`✅ ${totalLoaded} messages déjà envoyés chargés (seront ignorés)`);
@@ -141,7 +144,10 @@ async function scanHistory() {
     }
 
     lastMessageId = messages.last().id;
-    console.log(`📜 Scanné ${messages.size} messages...`);
+    console.log(`📜 Scanné ${messages.size} messages... (${collectedMessages.size} collectés)`);
+
+    // Pause pour permettre au bot de répondre aux commandes pendant le scan
+    await sleep(100);
   }
 
   console.log(`✅ Scan terminé! ${totalFound} nouveaux messages envoyés, ${totalSkipped} déjà présents`);
