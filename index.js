@@ -1,4 +1,6 @@
 const { Client, GatewayIntentBits, Partials, EmbedBuilder, SlashCommandBuilder, REST, Routes } = require('discord.js');
+const fs = require('fs');
+const path = require('path');
 
 const client = new Client({
   intents: [
@@ -15,10 +17,70 @@ const SOURCE_CHANNEL_ID = process.env.SOURCE_CHANNEL_ID;
 const TARGET_CHANNEL_ID = process.env.TARGET_CHANNEL_ID;
 const EMOJIS = (process.env.EMOJIS || '🤣,😂').split(',').map(e => e.trim());
 
+// Fichier pour persister les données
+const DATA_FILE = '/app/data.json';
+
 // Stockage des messages collectés (id -> data)
-const collectedMessages = new Map();
+let collectedMessages = new Map();
 // Set des messages déjà envoyés dans le salon destination
-const alreadySentIds = new Set();
+let alreadySentIds = new Set();
+
+// Compteur pour détecter les lancements multiples
+let scanCount = 0;
+
+// Sauvegarder les données dans un fichier
+function saveData() {
+  try {
+    const data = {
+      collectedMessages: [...collectedMessages.entries()],
+      alreadySentIds: [...alreadySentIds],
+      savedAt: new Date().toISOString()
+    };
+    fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
+    console.log(`💾 Données sauvegardées (${collectedMessages.size} messages)`);
+  } catch (error) {
+    console.error('❌ Erreur sauvegarde:', error.message);
+  }
+}
+
+// Charger les données depuis le fichier
+function loadData() {
+  try {
+    if (fs.existsSync(DATA_FILE)) {
+      const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
+      collectedMessages = new Map(data.collectedMessages || []);
+      alreadySentIds = new Set(data.alreadySentIds || []);
+      console.log(`📂 Données chargées: ${collectedMessages.size} messages, sauvegardé le ${data.savedAt}`);
+      return true;
+    }
+  } catch (error) {
+    console.error('❌ Erreur chargement:', error.message);
+  }
+  return false;
+}
+
+// Handlers pour détecter les crashs
+process.on('uncaughtException', (error) => {
+  console.error('💥 CRASH - uncaughtException:', error);
+  saveData();
+  process.exit(1);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 CRASH - unhandledRejection:', reason);
+});
+
+process.on('SIGTERM', () => {
+  console.log('⚠️ SIGTERM reçu - arrêt du bot');
+  saveData();
+  process.exit(0);
+});
+
+process.on('SIGINT', () => {
+  console.log('⚠️ SIGINT reçu - arrêt du bot');
+  saveData();
+  process.exit(0);
+});
 
 client.once('ready', async () => {
   console.log(`✅ Bot connecté en tant que ${client.user.tag}`);
@@ -26,14 +88,25 @@ client.once('ready', async () => {
   console.log(`📤 Destination: ${TARGET_CHANNEL_ID}`);
   console.log(`😂 Émojis: ${EMOJIS.join(', ')}`);
 
+  // Charger les données persistées
+  const hasData = loadData();
+
   // Enregistrer les slash commands
   await registerCommands();
 
-  // Scanner le salon destination pour récupérer les messages déjà envoyés
-  await loadAlreadySent();
+  // Scanner seulement si pas de données chargées
+  if (!hasData || collectedMessages.size === 0) {
+    // Scanner le salon destination pour récupérer les messages déjà envoyés
+    await loadAlreadySent();
 
-  // Scanner l'historique source
-  await scanHistory();
+    // Scanner l'historique source
+    await scanHistory();
+  } else {
+    console.log('⏭️ Scan ignoré - données déjà chargées depuis le fichier');
+  }
+
+  // Sauvegarder périodiquement (toutes les 5 minutes)
+  setInterval(saveData, 5 * 60 * 1000);
 });
 
 async function registerCommands() {
@@ -122,7 +195,12 @@ async function loadAlreadySent() {
 }
 
 async function scanHistory() {
-  console.log('🔍 Scan de l\'historique source en cours...');
+  scanCount++;
+  console.log(`🔍 Scan de l'historique source en cours... (scan #${scanCount})`);
+
+  if (scanCount > 1) {
+    console.error('⚠️ ATTENTION: Le scan a été lancé plusieurs fois! Quelque chose ne va pas.');
+  }
 
   const sourceChannel = await client.channels.fetch(SOURCE_CHANNEL_ID);
   const targetChannel = await client.channels.fetch(TARGET_CHANNEL_ID);
@@ -135,6 +213,7 @@ async function scanHistory() {
   let lastMessageId = null;
   let totalFound = 0;
   let totalSkipped = 0;
+  let batchNum = 0;
 
   while (true) {
     const options = { limit: 100 };
@@ -142,6 +221,8 @@ async function scanHistory() {
 
     const messages = await sourceChannel.messages.fetch(options);
     if (messages.size === 0) break;
+
+    batchNum++;
 
     for (const message of messages.values()) {
       const reaction = message.reactions.cache.find(r => EMOJIS.includes(r.emoji.name));
@@ -166,13 +247,19 @@ async function scanHistory() {
     }
 
     lastMessageId = messages.last().id;
-    console.log(`📜 Scanné ${messages.size} messages... (${collectedMessages.size} collectés)`);
+    console.log(`📜 Batch ${batchNum}: scanné ${messages.size} msgs (${collectedMessages.size} collectés, ${totalFound} nouveaux, ${totalSkipped} ignorés)`);
+
+    // Sauvegarder toutes les 10 batches
+    if (batchNum % 10 === 0) {
+      saveData();
+    }
 
     // Pause pour permettre au bot de répondre aux commandes pendant le scan
     await sleep(100);
   }
 
   console.log(`✅ Scan terminé! ${totalFound} nouveaux messages envoyés, ${totalSkipped} déjà présents`);
+  saveData();
 }
 
 async function storeMessage(message, reactionCount, emoji) {
@@ -223,7 +310,7 @@ function createEmbed(msgData) {
     })
     .setDescription(description)
     .setColor(0xFFD700)
-    .setTimestamp(msgData.createdAt)
+    .setTimestamp(new Date(msgData.createdAt))
     .setFooter({ text: `${msgData.emoji} ${msgData.reactionCount} | #${msgData.channelName}` });
 
   if (msgData.image) {
@@ -393,6 +480,7 @@ client.on('messageReactionAdd', async (reaction, user) => {
   alreadySentIds.add(message.id);
 
   console.log(`📨 Nouveau message collecté de ${message.author.tag}`);
+  saveData();
 });
 
 function sleep(ms) {
