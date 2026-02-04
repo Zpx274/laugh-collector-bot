@@ -499,6 +499,8 @@ client.on('messageReactionAdd', async (reaction, user) => {
   if (collectedMessages.has(reaction.message.id)) {
     const existing = collectedMessages.get(reaction.message.id);
     existing.reactionCount = reaction.count;
+    console.log(`🔄 Compteur mis à jour pour ${reaction.message.id}: ${reaction.count} réactions`);
+    saveData();
     return;
   }
 
@@ -520,6 +522,39 @@ client.on('messageReactionAdd', async (reaction, user) => {
   alreadySentIds.add(message.id);
 
   console.log(`📨 Nouveau message collecté de ${message.author.tag}`);
+  saveData();
+});
+
+// Surveillance en temps réel des réactions retirées
+client.on('messageReactionRemove', async (reaction, user) => {
+  if (reaction.message.channelId !== SOURCE_CHANNEL_ID) return;
+
+  if (reaction.partial) {
+    try {
+      await reaction.fetch();
+    } catch (error) {
+      // La réaction n'existe peut-être plus
+      return;
+    }
+  }
+
+  if (!EMOJIS.includes(reaction.emoji.name)) return;
+
+  // Vérifier si le message est dans notre collection
+  if (!collectedMessages.has(reaction.message.id)) return;
+
+  const existing = collectedMessages.get(reaction.message.id);
+
+  if (reaction.count === 0) {
+    // Plus aucune réaction de cet emoji, supprimer de la DB
+    collectedMessages.delete(reaction.message.id);
+    console.log(`🗑️ Message ${reaction.message.id} retiré de la DB (0 réactions)`);
+  } else {
+    // Mettre à jour le compteur
+    existing.reactionCount = reaction.count;
+    console.log(`🔄 Compteur mis à jour pour ${reaction.message.id}: ${reaction.count} réactions`);
+  }
+
   saveData();
 });
 
