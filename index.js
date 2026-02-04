@@ -132,7 +132,10 @@ async function registerCommands() {
           .setMaxValue(10)),
     new SlashCommandBuilder()
       .setName('lrandom')
-      .setDescription(`Affiche un message aléatoire parmi ceux collectés`)
+      .setDescription(`Affiche un message aléatoire parmi ceux collectés`),
+    new SlashCommandBuilder()
+      .setName('lscan')
+      .setDescription(`Force un rescan complet du salon (admin only)`)
   ].map(cmd => cmd.toJSON());
 
   const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
@@ -451,6 +454,29 @@ client.on('interactionCreate', async (interaction) => {
         }]
       }]
     });
+  }
+
+  if (interaction.commandName === 'lscan') {
+    const ADMIN_ID = '221371104046874625';
+
+    if (interaction.user.id !== ADMIN_ID) {
+      await interaction.reply({ content: `❌ Tu n'as pas la permission d'utiliser cette commande.`, ephemeral: true });
+      return;
+    }
+
+    console.log(`🔄 /lscan exécutée par ${interaction.user.tag}`);
+    await interaction.reply({ content: `🔄 Rescan en cours... (${collectedMessages.size} messages actuellement)`, ephemeral: true });
+
+    // Reset le compteur de scan
+    scanCount = 0;
+
+    // Recharger les IDs déjà envoyés
+    await loadAlreadySent();
+
+    // Relancer le scan
+    await scanHistory();
+
+    await interaction.followUp({ content: `✅ Rescan terminé! ${collectedMessages.size} messages collectés.`, ephemeral: true });
   }
 });
 
