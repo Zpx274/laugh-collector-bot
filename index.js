@@ -140,6 +140,10 @@ async function registerCommands() {
   try {
     console.log('🔧 Enregistrement des commandes slash...');
 
+    // Supprimer les anciennes commandes globales
+    await rest.put(Routes.applicationCommands(client.user.id), { body: [] });
+    console.log('🗑️ Anciennes commandes globales supprimées');
+
     // Enregistrer par guild pour que ce soit instantané
     for (const guild of client.guilds.cache.values()) {
       await rest.put(Routes.applicationGuildCommands(client.user.id, guild.id), { body: commands });
