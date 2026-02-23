@@ -562,4 +562,31 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Serveur HTTP pour télécharger data.json
+const http = require('http');
+const HTTP_PORT = process.env.HTTP_PORT || 3000;
+
+const server = http.createServer((req, res) => {
+  if (req.method === 'GET' && req.url === '/download') {
+    if (!fs.existsSync(DATA_FILE)) {
+      res.writeHead(404, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'data.json not found' }));
+      return;
+    }
+    const file = fs.readFileSync(DATA_FILE);
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Content-Disposition': 'attachment; filename="data.json"'
+    });
+    res.end(file);
+    return;
+  }
+  res.writeHead(404);
+  res.end();
+});
+
+server.listen(HTTP_PORT, () => {
+  console.log(`🌐 HTTP server listening on port ${HTTP_PORT} — GET /download`);
+});
+
 client.login(BOT_TOKEN);
